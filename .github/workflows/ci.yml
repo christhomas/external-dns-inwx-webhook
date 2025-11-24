@@ -25,16 +25,8 @@ jobs:
         go-version-file: go.mod
     - run: go test ./provider
 
-  build:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v5
-    - uses: actions/setup-go@v6
-      with:
-        go-version-file: go.mod
-    - run: go build
-
   release:
+    needs: [lint, test]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v5
@@ -50,6 +42,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-and-push-image:
+    needs: [lint, test]
     runs-on: ubuntu-latest
     permissions:
       contents: read
