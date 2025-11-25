@@ -12,6 +12,9 @@ jobs:
   build:
     needs: [test]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
     - id: version
       uses: orbit-online/image-version@v0.9.1
