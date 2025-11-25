@@ -10,6 +10,7 @@ jobs:
     uses: ./.github/workflows/test.yaml
     secrets: inherit
   build:
+    needs: [test]
     runs-on: ubuntu-latest
     steps:
     - id: version
