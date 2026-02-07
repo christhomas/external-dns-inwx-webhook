@@ -4,13 +4,14 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 
 	inwx "github.com/nrdcg/goinwx"
 )
 
 type MockClientWrapper struct {
 	db       map[string]*[]inwx.NameserverRecord
-	idToZone map[int]string
+	idToZone map[string]string
 }
 
 func (w *MockClientWrapper) login() (*inwx.LoginResponse, error) {
@@ -33,7 +34,7 @@ func (w *MockClientWrapper) getRecords(domain string) (*[]inwx.NameserverRecord,
 	} else {
 		undeletedRecs := []inwx.NameserverRecord{}
 		for _, rec := range *recs {
-			if rec.ID != -1 {
+			if rec.ID != "" {
 				undeletedRecs = append(undeletedRecs, rec)
 			}
 		}
@@ -50,7 +51,7 @@ func (w *MockClientWrapper) createRecord(r *inwx.NameserverRecordRequest) error 
 	if recs, ok := w.db[r.Domain]; !ok {
 		return fmt.Errorf("zone %s not found", r.Domain)
 	} else {
-		id := len(*recs)
+		id := strconv.Itoa(len(*recs))
 		newRecs := append(*recs, inwx.NameserverRecord{
 			ID:       id,
 			Name:     r.Name,
@@ -65,17 +66,24 @@ func (w *MockClientWrapper) createRecord(r *inwx.NameserverRecordRequest) error 
 	}
 }
 
-func (w *MockClientWrapper) updateRecord(recID int, r *inwx.NameserverRecordRequest) error {
+func (w *MockClientWrapper) findRecord(recs *[]inwx.NameserverRecord, recID string) int {
+	for i, rec := range *recs {
+		if rec.ID == recID {
+			return i
+		}
+	}
+	return -1
+}
+
+func (w *MockClientWrapper) updateRecord(recID string, r *inwx.NameserverRecordRequest) error {
 	if recs, ok := w.db[r.Domain]; !ok {
 		return fmt.Errorf("zone %s not found", r.Domain)
 	} else {
-		if recID >= len(*recs) {
-			return fmt.Errorf("record ID %d not found", recID)
+		idx := w.findRecord(recs, recID)
+		if idx == -1 {
+			return fmt.Errorf("record ID %s not found", recID)
 		}
-		if (*recs)[recID].ID == -1 {
-			return fmt.Errorf("record ID %d has been deleted", recID)
-		}
-		(*recs)[recID] = inwx.NameserverRecord{
+		(*recs)[idx] = inwx.NameserverRecord{
 			ID:       recID,
 			Name:     r.Name,
 			Type:     r.Type,
@@ -87,20 +95,21 @@ func (w *MockClientWrapper) updateRecord(recID int, r *inwx.NameserverRecordRequ
 	}
 }
 
-func (w *MockClientWrapper) deleteRecord(recID int) error {
+func (w *MockClientWrapper) deleteRecord(recID string) error {
 	if zone, ok := w.idToZone[recID]; !ok {
-		return fmt.Errorf("zone for record ID %d not found", recID)
+		return fmt.Errorf("zone for record ID %s not found", recID)
 	} else {
 		if recs, ok := w.db[zone]; !ok {
 			return fmt.Errorf("zone %s not found", zone)
 		} else {
-			if recID >= len(*recs) {
-				return fmt.Errorf("record ID %d not found", recID)
+			idx := w.findRecord(recs, recID)
+			if idx == -1 {
+				return fmt.Errorf("record ID %s not found", recID)
 			}
-			if (*recs)[recID].ID == -1 {
-				return fmt.Errorf("record ID %d has already been deleted", recID)
+			if (*recs)[idx].ID == "" {
+				return fmt.Errorf("record ID %s has already been deleted", recID)
 			}
-			(*recs)[recID].ID = -1
+			(*recs)[idx].ID = ""
 			return nil
 		}
 	}

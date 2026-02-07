@@ -15,7 +15,7 @@ import (
 func NewINWXProviderWithMockClient(domainFilter *[]string, logger *slog.Logger) (*MockClientWrapper, *INWXProvider) {
 	wrapper := &MockClientWrapper{
 		db:       make(map[string](*[]inwx.NameserverRecord)),
-		idToZone: make(map[int]string),
+		idToZone: make(map[string]string),
 	}
 	return wrapper, &INWXProvider{
 		client:       wrapper,
@@ -86,28 +86,28 @@ func testGetRecIDs(t *testing.T) {
 		Name:    "foo",
 		Type:    "TXT",
 		Content: "heritage=external-dns,external-dns/owner=default,external-dns/resource=service/default/nginx",
-		ID:      10,
+		ID:      "10",
 	}
 
 	inwx2 := inwx.NameserverRecord{
 		Name:    "foo",
 		Type:    "A",
 		Content: "5.5.5.5",
-		ID:      11,
+		ID:      "11",
 	}
 
 	inwx3 := inwx.NameserverRecord{
 		Name:    "",
 		Type:    "A",
 		Content: "5.5.5.5",
-		ID:      12,
+		ID:      "12",
 	}
 
 	inwx4 := inwx.NameserverRecord{
 		Name:    "",
 		Type:    "A",
 		Content: "5.5.5.6",
-		ID:      13,
+		ID:      "13",
 	}
 
 	records := []inwx.NameserverRecord{inwx1, inwx2, inwx3, inwx4}
@@ -118,7 +118,7 @@ func testGetRecIDs(t *testing.T) {
 		RecordType: "TXT",
 	})
 	assert.NoError(t, err)
-	assert.Equal(t, []int{10}, recIDs)
+	assert.Equal(t, []string{"10"}, recIDs)
 
 	recIDs, err = getRecIDs("baz.org", &records, endpoint.Endpoint{
 		DNSName:    "foo.baz.org",
@@ -126,7 +126,7 @@ func testGetRecIDs(t *testing.T) {
 		RecordType: "A",
 	})
 	assert.NoError(t, err)
-	assert.Equal(t, []int{11}, recIDs)
+	assert.Equal(t, []string{"11"}, recIDs)
 
 	recIDs, err = getRecIDs("baz.org", &records, endpoint.Endpoint{
 		DNSName:    "baz.org",
@@ -134,7 +134,7 @@ func testGetRecIDs(t *testing.T) {
 		RecordType: "A",
 	})
 	assert.NoError(t, err)
-	assert.Equal(t, []int{12, 13}, recIDs)
+	assert.Equal(t, []string{"12", "13"}, recIDs)
 
 }
 
@@ -159,7 +159,7 @@ func testApplyChanges(t *testing.T) {
 	recs, err = w.getRecords("example.com")
 	assert.NoError(t, err)
 	assert.Equal(t, &[]inwx.NameserverRecord{{
-		ID:      0,
+		ID:      "0",
 		Name:    "foo",
 		Type:    "A",
 		Content: "1.1.1.1",
@@ -182,7 +182,7 @@ func testApplyChanges(t *testing.T) {
 	recs, err = w.getRecords("example.com")
 	assert.NoError(t, err)
 	assert.Equal(t, &[]inwx.NameserverRecord{{
-		ID:      0,
+		ID:      "0",
 		Name:    "foo",
 		Type:    "A",
 		Content: "1.1.1.2",

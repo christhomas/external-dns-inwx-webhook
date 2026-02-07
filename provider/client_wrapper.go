@@ -16,8 +16,8 @@ type AbstractClientWrapper interface {
 	getRecords(domain string) (*[]inwx.NameserverRecord, error)
 	getZones() (*[]string, error)
 	createRecord(request *inwx.NameserverRecordRequest) error
-	updateRecord(recID int, request *inwx.NameserverRecordRequest) error
-	deleteRecord(recID int) error
+	updateRecord(recID string, request *inwx.NameserverRecordRequest) error
+	deleteRecord(recID string) error
 }
 
 func (w *ClientWrapper) login() (*inwx.LoginResponse, error) {
@@ -53,10 +53,10 @@ func (w *ClientWrapper) createRecord(request *inwx.NameserverRecordRequest) erro
 	return err
 }
 
-func (w *ClientWrapper) updateRecord(recID int, request *inwx.NameserverRecordRequest) error {
+func (w *ClientWrapper) updateRecord(recID string, request *inwx.NameserverRecordRequest) error {
 	return w.client.Nameservers.UpdateRecord(recID, request)
 }
 
-func (w *ClientWrapper) deleteRecord(recID int) error {
+func (w *ClientWrapper) deleteRecord(recID string) error {
 	return w.client.Nameservers.DeleteRecord(recID)
 }

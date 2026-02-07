@@ -212,8 +212,8 @@ func (p *INWXProvider) ApplyChanges(ctx context.Context, changes *plan.Changes) 
 	}
 }
 
-func getRecIDs(zone string, records *[]inwx.NameserverRecord, ep endpoint.Endpoint) ([]int, error) {
-	recIDs := []int{}
+func getRecIDs(zone string, records *[]inwx.NameserverRecord, ep endpoint.Endpoint) ([]string, error) {
+	recIDs := []string{}
 	for _, target := range ep.Targets {
 		for _, record := range *records {
 			var targetDNSName string
