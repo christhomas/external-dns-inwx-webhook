@@ -376,5 +376,16 @@ func getZone(zones *[]string, endpoint *endpoint.Endpoint) (string, error) {
 			err = nil
 		}
 	}
+	// Fallback for external-dns type-prefixed TXT records on apex domains.
+	// e.g., _edns.a-beersandbusiness.com where zone is beersandbusiness.com —
+	// the zone appears after a hyphen rather than a dot boundary.
+	if matchZoneName == "" {
+		for _, zone := range *zones {
+			if strings.HasSuffix(endpoint.DNSName, "-"+zone) && len(zone) > len(matchZoneName) {
+				matchZoneName = zone
+				err = nil
+			}
+		}
+	}
 	return matchZoneName, err
 }

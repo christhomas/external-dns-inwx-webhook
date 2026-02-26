@@ -319,6 +319,14 @@ func testExtractRecordName(t *testing.T) {
 	assert.Equal(t, "_edns.a-ratemybravas",
 		extractRecordName("_edns.a-ratemybravas.com.ratemybravas.com", "ratemybravas.com"))
 
+	// Hyphen-boundary case: zone matched via hyphen fallback (no dot+zone suffix to strip)
+	// extractRecordName still works because label stripping removes the leaked TLD
+	assert.Equal(t, "_edns.a-beersandbusiness",
+		extractRecordName("_edns.a-beersandbusiness.com", "beersandbusiness.com"))
+
+	assert.Equal(t, "_edns.a-ratemybravas",
+		extractRecordName("_edns.a-ratemybravas.com", "ratemybravas.com"))
+
 	// Normal case that should NOT be stripped
 	assert.Equal(t, "foo", extractRecordName("foo.bar.org", "bar.org"))
 
@@ -341,13 +349,20 @@ func testGetZoneDotBoundary(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "example.com", z)
 
-	// External-dns TXT record with zone in label should NOT false-match
-	// _edns.a-beersandbusiness.com does NOT end with .beersandbusiness.com (no dot boundary)
+	// External-dns type-prefixed TXT record for apex domain: zone after hyphen boundary
+	// _edns.a-beersandbusiness.com → matches beersandbusiness.com via hyphen fallback
 	ep3 := endpoint.Endpoint{DNSName: "_edns.a-beersandbusiness.com"}
-	_, err = getZone(zones, &ep3)
-	assert.Error(t, err, "should not match beersandbusiness.com without dot boundary")
+	z, err = getZone(zones, &ep3)
+	assert.NoError(t, err)
+	assert.Equal(t, "beersandbusiness.com", z)
 
-	// But the full FQDN with zone appended SHOULD match
+	// Same for ratemybravas
+	ep3b := endpoint.Endpoint{DNSName: "_edns.a-ratemybravas.com"}
+	z, err = getZone(zones, &ep3b)
+	assert.NoError(t, err)
+	assert.Equal(t, "ratemybravas.com", z)
+
+	// Full FQDN with zone appended should still match via strict dot boundary
 	ep4 := endpoint.Endpoint{DNSName: "_edns.a-beersandbusiness.com.beersandbusiness.com"}
 	z, err = getZone(zones, &ep4)
 	assert.NoError(t, err)
