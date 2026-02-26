@@ -31,6 +31,8 @@ func TestINWXProvider(t *testing.T) {
 	t.Run("CreateIsIdempotent", testCreateIsIdempotent)
 	t.Run("CreateUpsertsWhenDifferentContent", testCreateUpsertsWhenDifferentContent)
 	t.Run("UpdateFallsBackWhenOldRecordMissing", testUpdateFallsBackWhenOldRecordMissing)
+	t.Run("ExtractRecordName", testExtractRecordName)
+	t.Run("GetZoneDotBoundary", testGetZoneDotBoundary)
 	t.Run("Records", testRecords)
 }
 
@@ -297,6 +299,64 @@ func testUpdateFallsBackWhenOldRecordMissing(t *testing.T) {
 	recs, _ := w.getRecords("example.com")
 	assert.Len(t, *recs, 1)
 	assert.Equal(t, "2.2.2.2", (*recs)[0].Content)
+}
+
+func testExtractRecordName(t *testing.T) {
+	// Normal subdomain
+	assert.Equal(t, "foo", extractRecordName("foo.example.com", "example.com"))
+
+	// Zone apex
+	assert.Equal(t, "", extractRecordName("example.com", "example.com"))
+
+	// Multi-level subdomain
+	assert.Equal(t, "_edns.git", extractRecordName("_edns.git.antimatter-studios.com", "antimatter-studios.com"))
+
+	// Apex domain TXT record: external-dns generates a-domain.com as part of the name
+	// After zone stripping, .com leaks into the name. extractRecordName should strip it.
+	assert.Equal(t, "_edns.a-beersandbusiness",
+		extractRecordName("_edns.a-beersandbusiness.com.beersandbusiness.com", "beersandbusiness.com"))
+
+	assert.Equal(t, "_edns.a-ratemybravas",
+		extractRecordName("_edns.a-ratemybravas.com.ratemybravas.com", "ratemybravas.com"))
+
+	// Normal case that should NOT be stripped
+	assert.Equal(t, "foo", extractRecordName("foo.bar.org", "bar.org"))
+
+	// Nested subdomain under zone
+	assert.Equal(t, "foo.otherdomain", extractRecordName("foo.otherdomain.bar.org", "bar.org"))
+}
+
+func testGetZoneDotBoundary(t *testing.T) {
+	zones := &[]string{"beersandbusiness.com", "ratemybravas.com", "example.com"}
+
+	// Normal subdomain matches
+	ep1 := endpoint.Endpoint{DNSName: "foo.example.com"}
+	z, err := getZone(zones, &ep1)
+	assert.NoError(t, err)
+	assert.Equal(t, "example.com", z)
+
+	// Zone apex matches
+	ep2 := endpoint.Endpoint{DNSName: "example.com"}
+	z, err = getZone(zones, &ep2)
+	assert.NoError(t, err)
+	assert.Equal(t, "example.com", z)
+
+	// External-dns TXT record with zone in label should NOT false-match
+	// _edns.a-beersandbusiness.com does NOT end with .beersandbusiness.com (no dot boundary)
+	ep3 := endpoint.Endpoint{DNSName: "_edns.a-beersandbusiness.com"}
+	_, err = getZone(zones, &ep3)
+	assert.Error(t, err, "should not match beersandbusiness.com without dot boundary")
+
+	// But the full FQDN with zone appended SHOULD match
+	ep4 := endpoint.Endpoint{DNSName: "_edns.a-beersandbusiness.com.beersandbusiness.com"}
+	z, err = getZone(zones, &ep4)
+	assert.NoError(t, err)
+	assert.Equal(t, "beersandbusiness.com", z)
+
+	// No matching zone
+	ep5 := endpoint.Endpoint{DNSName: "foo.unknown.org"}
+	_, err = getZone(zones, &ep5)
+	assert.Error(t, err)
 }
 
 func testRecords(t *testing.T) {

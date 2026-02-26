@@ -2,6 +2,7 @@ package inwx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -104,7 +105,7 @@ func (p *INWXProvider) ApplyChanges(ctx context.Context, changes *plan.Changes) 
 		zone, err := getZone(zones, ep)
 		if err != nil {
 			errs = append(errs, err)
-			slog.Error("failed to create DNS record for endpoint", "err", err)
+			slog.Error("failed to find zone for endpoint", "err", err)
 		} else {
 			if _, ok := recordsCache[zone]; !ok {
 				if recs, err := p.client.getRecords(zone); err != nil {
@@ -134,7 +135,7 @@ func (p *INWXProvider) ApplyChanges(ctx context.Context, changes *plan.Changes) 
 		zone, err := getZone(zones, ep)
 		if err != nil {
 			errs = append(errs, err)
-			slog.Error("failed to create DNS record for endpoint", "err", err)
+			slog.Error("failed to find zone for endpoint", "err", err)
 			continue
 		}
 		if _, ok := recordsCache[zone]; !ok {
@@ -146,14 +147,8 @@ func (p *INWXProvider) ApplyChanges(ctx context.Context, changes *plan.Changes) 
 				recordsCache[zone] = recs
 			}
 		}
+		name := extractRecordName(ep.DNSName, zone)
 		for _, target := range ep.Targets {
-			var name string
-			if ep.DNSName == zone {
-				name = ""
-			} else {
-				name = strings.TrimSuffix(ep.DNSName, fmt.Sprintf(".%s", zone))
-			}
-
 			existing := findRecordsByNameAndType(zone, recordsCache[zone], ep.DNSName, ep.RecordType)
 
 			rec := &inwx.NameserverRecordRequest{
@@ -184,8 +179,13 @@ func (p *INWXProvider) ApplyChanges(ctx context.Context, changes *plan.Changes) 
 			}
 
 			if err = p.client.createRecord(rec); err != nil {
-				errs = append(errs, err)
-				slog.Error("failed to create record", "rec", rec, "err", err)
+				if isObjectExistsError(err) {
+					slog.Debug("record already exists in INWX, skipping",
+						"name", ep.DNSName, "type", ep.RecordType, "content", target)
+				} else {
+					errs = append(errs, err)
+					slog.Error("failed to create record", "rec", rec, "err", err)
+				}
 			}
 		}
 	}
@@ -208,12 +208,7 @@ func (p *INWXProvider) ApplyChanges(ctx context.Context, changes *plan.Changes) 
 				}
 			}
 			recIDs, err := getRecIDs(zone, recordsCache[zone], *oldEp)
-			var name string
-			if newEp.DNSName == zone {
-				name = ""
-			} else {
-				name = strings.TrimSuffix(newEp.DNSName, fmt.Sprintf(".%s", zone))
-			}
+			name := extractRecordName(newEp.DNSName, zone)
 
 			// If old records not found, fall back to upsert for new targets
 			if err != nil {
@@ -232,8 +227,13 @@ func (p *INWXProvider) ApplyChanges(ctx context.Context, changes *plan.Changes) 
 						Content: target,
 					}
 					if err = p.client.createRecord(rec); err != nil {
-						errs = append(errs, err)
-						slog.Error("failed to create record during update fallback", "rec", rec, "err", err)
+						if isObjectExistsError(err) {
+							slog.Debug("record already exists in INWX, skipping",
+								"name", newEp.DNSName, "type", newEp.RecordType, "content", target)
+						} else {
+							errs = append(errs, err)
+							slog.Error("failed to create record during update fallback", "rec", rec, "err", err)
+						}
 					}
 				}
 				continue
@@ -255,8 +255,13 @@ func (p *INWXProvider) ApplyChanges(ctx context.Context, changes *plan.Changes) 
 						Content: newEp.Targets[j],
 					}
 					if err = p.client.createRecord(rec); err != nil {
-						errs = append(errs, err)
-						slog.Error("failed to create record", "rec", rec, "err", err)
+						if isObjectExistsError(err) {
+							slog.Debug("record already exists in INWX, skipping",
+								"name", newEp.DNSName, "type", newEp.RecordType, "content", newEp.Targets[j])
+						} else {
+							errs = append(errs, err)
+							slog.Error("failed to create record", "rec", rec, "err", err)
+						}
 					}
 				default:
 					rec := &inwx.NameserverRecordRequest{
@@ -281,17 +286,55 @@ func (p *INWXProvider) ApplyChanges(ctx context.Context, changes *plan.Changes) 
 	}
 }
 
+// isObjectExistsError returns true if the error is an INWX API error with code 2302 (Object exists).
+func isObjectExistsError(err error) bool {
+	var apiErr *inwx.ErrorResponse
+	if errors.As(err, &apiErr) {
+		return apiErr.Code == 2302
+	}
+	return false
+}
+
+// extractRecordName computes the INWX record name from a full DNS name and zone.
+// It also strips trailing zone labels that leak into the record name, which happens
+// with external-dns's apex domain ownership records (e.g., _edns.a-domain.com.domain.com
+// → record name "a-domain.com" → stripped to "a-domain" since INWX rejects names
+// that look like domain names).
+func extractRecordName(dnsName string, zone string) string {
+	if dnsName == zone {
+		return ""
+	}
+	name := strings.TrimSuffix(dnsName, "."+zone)
+
+	// Strip trailing labels that match the zone's labels.
+	// e.g., name="_edns.a-beersandbusiness.com", zone="beersandbusiness.com"
+	// → labels ["_edns","a-beersandbusiness","com"] vs zone labels ["beersandbusiness","com"]
+	// → strip "com" → "_edns.a-beersandbusiness"
+	nameLabels := strings.Split(name, ".")
+	zoneLabels := strings.Split(zone, ".")
+	stripped := 0
+	for stripped < len(zoneLabels) && stripped < len(nameLabels)-1 {
+		ni := len(nameLabels) - 1 - stripped
+		zi := len(zoneLabels) - 1 - stripped
+		if nameLabels[ni] == zoneLabels[zi] {
+			stripped++
+		} else {
+			break
+		}
+	}
+	if stripped > 0 {
+		name = strings.Join(nameLabels[:len(nameLabels)-stripped], ".")
+	}
+
+	return name
+}
+
 func getRecIDs(zone string, records *[]inwx.NameserverRecord, ep endpoint.Endpoint) ([]string, error) {
+	targetName := extractRecordName(ep.DNSName, zone)
 	recIDs := []string{}
 	for _, target := range ep.Targets {
 		for _, record := range *records {
-			var targetDNSName string
-			if record.Name == "" {
-				targetDNSName = zone
-			} else {
-				targetDNSName = fmt.Sprintf("%s.%s", record.Name, zone)
-			}
-			if ep.RecordType == record.Type && target == record.Content && targetDNSName == ep.DNSName {
+			if ep.RecordType == record.Type && target == record.Content && record.Name == targetName {
 				recIDs = append(recIDs, record.ID)
 			}
 		}
@@ -304,15 +347,10 @@ func getRecIDs(zone string, records *[]inwx.NameserverRecord, ep endpoint.Endpoi
 
 // findRecordsByNameAndType returns existing records matching the given DNS name and record type.
 func findRecordsByNameAndType(zone string, records *[]inwx.NameserverRecord, dnsName string, recordType string) []inwx.NameserverRecord {
+	targetName := extractRecordName(dnsName, zone)
 	var matches []inwx.NameserverRecord
 	for _, record := range *records {
-		var targetDNSName string
-		if record.Name == "" {
-			targetDNSName = zone
-		} else {
-			targetDNSName = fmt.Sprintf("%s.%s", record.Name, zone)
-		}
-		if recordType == record.Type && targetDNSName == dnsName {
+		if recordType == record.Type && record.Name == targetName {
 			matches = append(matches, record)
 		}
 	}
@@ -333,7 +371,7 @@ func getZone(zones *[]string, endpoint *endpoint.Endpoint) (string, error) {
 	var matchZoneName = ""
 	err := fmt.Errorf("unable find matching zone for the endpoint %s", endpoint)
 	for _, zone := range *zones {
-		if strings.HasSuffix(endpoint.DNSName, zone) && len(zone) > len(matchZoneName) {
+		if (endpoint.DNSName == zone || strings.HasSuffix(endpoint.DNSName, "."+zone)) && len(zone) > len(matchZoneName) {
 			matchZoneName = zone
 			err = nil
 		}
